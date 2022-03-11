@@ -1,0 +1,1 @@
+https://schier.co/blog/a-simple-web-scraper-in-go
