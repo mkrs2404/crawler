@@ -1,1 +1,6 @@
 https://schier.co/blog/a-simple-web-scraper-in-go
+https://en.wikipedia.org/wiki/Main_Page
+https://vorozhko.net/get-all-links-from-html-page-with-go-lang
+https://github.com/mkrs2404/crawler
+https://stackoverflow.com/questions/15113410/when-to-use-a-buffered-channel
+https://stackoverflow.com/questions/61719731/goroutines-throttle-example/61720003#61720003

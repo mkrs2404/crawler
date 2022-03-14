@@ -4,9 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"golang.org/x/net/html"
-	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"sync"
 )
 
 func main() {
@@ -15,32 +16,59 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
+
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(links))
+
+	linkChan := make(chan string)
 	for _, link := range links {
-		hitURL(link)
+		go getLinksFromUrl(&waitGroup, linkChan, link)
 	}
+
+	for url := range linkChan {
+		if IsUrlValid(url) {
+			fmt.Println(url)
+			go getLinksFromUrl(&waitGroup, linkChan, url)
+		}
+	}
+
+	waitGroup.Wait()
 }
 
-func hitURL(url string) {
-	resp, err := http.Get(url)
+func IsUrlValid(urlStr string) bool {
+	u, err := url.Parse(urlStr)
+	return err == nil && u.Scheme != "" && u.Host != ""
+}
+
+//func hitURL(waitGroup *sync.WaitGroup, url string) {
+//	resp, err := http.Get(url)
+//	if err != nil {
+//		fmt.Println("Error fetching from URL : ", url)
+//	}
+//	defer resp.Body.Close()
+//	links, err := getLinksFromBody(resp.Body)
+//	for _, link := range links {
+//		fmt.Println(link)
+//	}
+//	waitGroup.Done()
+//}
+
+func getLinksFromUrl(waitGroup *sync.WaitGroup, linkChan chan string, urlStr string) {
+
+	resp, err := http.Get(urlStr)
 	if err != nil {
-		fmt.Println("Error fetching from URL : ", url)
+		fmt.Println("Error fetching from URL : ", urlStr)
+		return
 	}
-	defer resp.Body.Close()
-	links, err := getLinksFromBody(resp.Body)
-	for _, link := range links {
-		fmt.Println(link)
-	}
-}
+	body := resp.Body
+	defer body.Close()
 
-func getLinksFromBody(body io.Reader) ([]string, error) {
-
-	var links []string
 	z := html.NewTokenizer(body)
 	for {
 		tt := z.Next()
 		switch tt {
 		case html.ErrorToken:
-			return links, nil
+			continue
 		case html.StartTagToken:
 			token := z.Token()
 			if token.Data != "a" {
@@ -48,11 +76,12 @@ func getLinksFromBody(body io.Reader) ([]string, error) {
 			}
 			for _, attr := range token.Attr {
 				if attr.Key == "href" {
-					links = append(links, attr.Val)
+					linkChan <- attr.Val
 				}
 			}
 		}
 	}
+
 }
 
 func getLinksFromFile(filename string) ([]string, error) {
