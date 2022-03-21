@@ -4,13 +4,20 @@ import (
 	"bufio"
 	"fmt"
 	"golang.org/x/net/html"
+	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 	"os"
 	"sync"
 )
 
+const maxRoutines = 5
+
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	filename := "links.txt"
 	links, err := getLinksFromFile(filename)
 	if err != nil {
@@ -18,20 +25,19 @@ func main() {
 	}
 
 	var waitGroup sync.WaitGroup
-	waitGroup.Add(len(links))
+	waitGroup.Add(maxRoutines)
 
 	linkChan := make(chan string)
-	for _, link := range links {
-		go getLinksFromUrl(&waitGroup, linkChan, link)
+
+	for i := 1; i <= maxRoutines; i++ {
+		go worker(linkChan)
 	}
 
-	for url := range linkChan {
-		if IsUrlValid(url) {
-			fmt.Println(url)
-			go getLinksFromUrl(&waitGroup, linkChan, url)
+	for _, link := range links {
+		if IsUrlValid(link) {
+			linkChan <- link
 		}
 	}
-
 	waitGroup.Wait()
 }
 
@@ -40,25 +46,33 @@ func IsUrlValid(urlStr string) bool {
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
-//func hitURL(waitGroup *sync.WaitGroup, url string) {
-//	resp, err := http.Get(url)
-//	if err != nil {
-//		fmt.Println("Error fetching from URL : ", url)
-//	}
-//	defer resp.Body.Close()
-//	links, err := getLinksFromBody(resp.Body)
-//	for _, link := range links {
-//		fmt.Println(link)
-//	}
-//	waitGroup.Done()
-//}
+func worker(linkChan chan string) {
+	for link := range linkChan {
+		links, err := getLinksFromUrl(link)
+		if err != nil {
+			fmt.Println("Error fetching from URL : ", link)
+		} else {
+			go queueLinks(linkChan, links)
+		}
+	}
 
-func getLinksFromUrl(waitGroup *sync.WaitGroup, linkChan chan string, urlStr string) {
+}
 
+func queueLinks(linkChan chan string, links []string) {
+	for _, link := range links {
+		if IsUrlValid(link) {
+			fmt.Println(link)
+			linkChan <- link
+		}
+	}
+}
+
+func getLinksFromUrl(urlStr string) ([]string, error) {
+
+	var links []string
 	resp, err := http.Get(urlStr)
 	if err != nil {
-		fmt.Println("Error fetching from URL : ", urlStr)
-		return
+		return links, err
 	}
 	body := resp.Body
 	defer body.Close()
@@ -68,7 +82,7 @@ func getLinksFromUrl(waitGroup *sync.WaitGroup, linkChan chan string, urlStr str
 		tt := z.Next()
 		switch tt {
 		case html.ErrorToken:
-			continue
+			return links, err
 		case html.StartTagToken:
 			token := z.Token()
 			if token.Data != "a" {
@@ -76,12 +90,11 @@ func getLinksFromUrl(waitGroup *sync.WaitGroup, linkChan chan string, urlStr str
 			}
 			for _, attr := range token.Attr {
 				if attr.Key == "href" {
-					linkChan <- attr.Val
+					links = append(links, attr.Val)
 				}
 			}
 		}
 	}
-
 }
 
 func getLinksFromFile(filename string) ([]string, error) {
